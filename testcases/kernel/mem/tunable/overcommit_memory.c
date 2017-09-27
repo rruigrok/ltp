@@ -91,7 +91,7 @@ static long commit_left;
 
 static int heavy_malloc(long size);
 static void alloc_and_check(long size, int expect_result);
-static void update_mem(void);
+static int update_mem(void);
 
 static void setup(void)
 {
@@ -152,8 +152,8 @@ static void overcommit_memory_test(void)
 	update_mem();
 	alloc_and_check(commit_left * 2, EXPECT_FAIL);
 	alloc_and_check(commit_limit, EXPECT_FAIL);
-	update_mem();
-	alloc_and_check(commit_left / 2, EXPECT_PASS);
+	if (update_mem() == 0)
+		alloc_and_check(commit_left / 2, EXPECT_PASS);
 
 	/* start to test overcommit_memory=0 */
 	set_sys_tune("overcommit_memory", 0, 1);
@@ -192,6 +192,11 @@ static void alloc_and_check(long size, int expect_result)
 {
 	int result;
 
+	if (size == 0) {
+		tst_res(TCONF, "skip allocation test for allocation size 0");
+		return;
+        }
+
 	/* try to alloc size kB memory */
 	result = heavy_malloc(size);
 
@@ -214,7 +219,8 @@ static void alloc_and_check(long size, int expect_result)
 	}
 }
 
-static void update_mem(void)
+
+static int update_mem(void)
 {
 	long mem_free, swap_free;
 	long committed;
@@ -228,13 +234,20 @@ static void update_mem(void)
 		committed = SAFE_READ_MEMINFO("Committed_AS:");
 		commit_left = commit_limit - committed;
 
-		if (commit_left < 0) {
+		if ((commit_left < 0) && (swap_free <= 0)) {
+			tst_res(TCONF, "Skip test in case of no swap space and"
+				 " CommitLimit < Committed_AS");
+			return 1;
+		}
+
+		if (commit_left < 0)  {
 			tst_res(TINFO, "CommitLimit is %ld, Committed_AS"
-				 " is %ld", commit_limit, committed);
+				" is %ld", commit_limit, committed);
 			tst_brk(TBROK, "Unexpected error: "
-				 "CommitLimit < Committed_AS");
+					"CommitLimit < Committed_AS");
 		}
 	}
+	return 0;
 }
 
 static struct tst_test test = {
